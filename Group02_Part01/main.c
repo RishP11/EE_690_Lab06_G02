@@ -15,8 +15,6 @@
 
 void PORT_E_init( void );
 void PORT_F_init( void );
-//void GPTM_SETUP( void );
-// void Delay(float seconds);
 void DynamicPWM(float duty_cycle, float on_time, float off_time);
 
 int main(void)
@@ -100,29 +98,3 @@ void DynamicPWM(float duty_cycle, float on_time, float off_time)
         // Stop the timer
     STCTRL = 0;
 }
-
-//void GPTM_SETUP( void ){
-//    // GPTMT = General Purpose Timer Module
-//    // Provide clock access to GPTM
-//    SYSCTL_RCGCTIMER_R |= 0x01 ;
-//    // GPTMT Control Register :: Ensure that the timer is disabled.
-//    TIMER0_CTL_R = 0x00 ;
-//    // GPTMT Configuration Register :: 32-bit (concatenated) mode
-//    TIMER0_CFG_R = 0x00 ;
-//    // GPTMT Timer and Mode Register :: Selecting the mode (one-shot) and count direction (count-down)
-//    TIMER0_TAMR_R &= ~(1 << 4) ;
-//    TIMER0_TAMR_R |= (1 << 1) ;
-//}
-
-// void Delay(float seconds)
-// {
-//     // GPTMT Interval Load Register :: Load the counter value
-//     TIMER0_TAILR_R = (CLOCK_HZ * seconds) - 1 ;
-// //    TIMER0_TAILR_R = 4294967295 ;
-//     // Set the TAEN bit = 1 to enable the timer A.
-//     TIMER0_CTL_R |= (1 << 8) | (1 << 0) ;
-//     while (TIMER0_TAR_R > 0){
-//         ;
-//     }
-//     TIMER0_CTL_R &= ~(1 << 0) ;
-// }
