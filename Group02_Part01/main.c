@@ -1,45 +1,37 @@
-#define STCTRL *((volatile long *) 0xE000E010)          // control and status
-#define STRELOAD *((volatile long *) 0xE000E014)        // reload value
-#define STCURRENT *((volatile long *) 0xE000E018)       // current value
-#define COUNT_FLAG  (1 << 16)                           // bit 16 of CSR automatically set to 1
-#define ENABLE      (1 << 0)                            // bit 0 of CSR to enable the timer
-#define CLKINT      (1 << 2)                            // bit 2 of CSR to specify CPU clock
+// #define STCTRL *((volatile long *) 0xE000E010)          // control and status
+// #define STRELOAD *((volatile long *) 0xE000E014)        // reload value
+// #define STCURRENT *((volatile long *) 0xE000E018)       // current value
+
+// #define COUNT_FLAG  (1 << 16)                           // bit 16 of CSR automatically set to 1
+// #define ENABLE      (1 << 0)                            // bit 0 of CSR to enable the timer
+// #define CLKINT      (1 << 2)                            // bit 2 of CSR to specify CPU clock
 #define CLOCK_HZ    16000000                            // Timer clock frequency
 #define MAX_RELOAD  16777215
-#define PWM_FREQ    100000                             // Frequency of the PWM waveform in Hz
+#define PWM_FREQ    100000                                  // Frequency of the PWM waveform in Hz
+float duty_cycle = 50.0 ;
 
 #include <stdint.h>
 #include <stdbool.h>
 #include "tm4c123gh6pm.h"
 
-void PORT_E_init( void );
 void PORT_F_init( void );
 void GPTM_SETUP( float duty_cycle );
+void GPIOF_SETUP( void );
+void GPIOF_ISR( void );
 
 int main(void)
 {
-    float duty_cycle = 99.0 ;
     // Setup Port F
     PORT_F_init();
-    // Setup Port E
-    PORT_E_init();
     // Setup PWM Timer
     GPTM_SETUP( duty_cycle );
     // Setup Interrupt for GPIO
+    GPIOF_SETUP();
     while(1){
-        ;// Everything done by the interrupts
+        ;
     }
 }
 
-void PORT_E_init( void )
-{
-    SYSCTL_RCGC2_R |= SYSCTL_RCGC2_GPIOE ;               // Enable clock to PORT_E
-    GPIO_PORTE_LOCK_R = 0x4C4F434B ;             // Unlock commit register
-    GPIO_PORTE_CR_R = 0x01 ;                     // Make PORT_E0 configurable
-    GPIO_PORTE_DEN_R = 0x01 ;                    // Set PE0 pin as digital
-    GPIO_PORTE_DIR_R = 0x01 ;                    // Set PE0 pin as output
-    GPIO_PORTE_DATA_R = 0x00 ;
-}
 void PORT_F_init( void )
 {
     SYSCTL_RCGC2_R |= SYSCTL_RCGC2_GPIOF ;      // Enable clock to GPIO_F
@@ -73,4 +65,41 @@ void GPTM_SETUP( float duty_cycle ){
     TIMER0_TBMATCHR_R = match_value ;
     // GPTM CTL register :: Start the timer:
     TIMER0_CTL_R |= (1 << 8) ;
+}
+
+void GPIOF_SETUP( void )
+{
+    // PORT F = ...|SW1|G|B|R|SW2|
+    // Interrupt sense register :: Used to configure whether interrupt is level/ edge sensitive.
+    // 1 => Level detection and 0 => Edge detection
+    GPIO_PORTF_IS_R = 0x00 ;
+    // Interrupt Event Register :: Used to configure whether event to be detected is high/low or rising/falling.
+    // 1 => Rising Edge/ High and 0 => Falling Edge/ Low
+    GPIO_PORTF_IEV_R = 0x00 ;
+    // Interrupt Both Edges Register :: Used to configure whether both edges are to be detected as events for interrupt.
+    GPIO_PORTF_IBE_R = 0x00 ;
+    // Interrupt Mask Register :: To determine whether to allow the interrupt generated to be passed onto interrupt controller or not.
+    // 1 == Send the interrupt
+    // 0 == Do not send the interrupt
+    GPIO_PORTF_IM_R = 0x11 ;
+    // Interrupt Clear Register :: Used to clear any pending interrupts
+    GPIO_PORTF_ICR_R = 0x11 ;
+    NVIC_EN0_R |=  (1 << 30) ; // Enable interrupt for GPIO Port F
+}
+
+void GPIOF_ISR( void )
+{
+    // PORT F = ...|SW1|G|B|R|SW2|
+    GPIO_PORTF_ICR_R = 0x11 ;
+    if((~(GPIO_PORTF_DATA_R) & 0x01) && duty_cycle < 95){
+        duty_cycle += 5.0 ;
+    }
+    if((~(GPIO_PORTF_DATA_R) & 0x10) && duty_cycle > 5){
+        duty_cycle -= 5.0 ;
+    }
+    unsigned long int count_value = CLOCK_HZ * (1.0 / PWM_FREQ) ;
+    unsigned long int match_value = count_value - (duty_cycle * CLOCK_HZ / (100 * PWM_FREQ)) ;
+    // GPTM Interval Load Register :: Count Top value
+    // GPTM Match Value register
+    TIMER0_TBMATCHR_R = match_value ;
 }
