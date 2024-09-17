@@ -1,70 +1,29 @@
-#define STCTRL *((volatile long *) 0xE000E010)          // control and status
-#define STRELOAD *((volatile long *) 0xE000E014)        // reload value
-#define STCURRENT *((volatile long *) 0xE000E018)       // current value
-
-#define COUNT_FLAG  (1 << 16)                           // bit 16 of CSR automatically set to 1
-#define ENABLE      (1 << 0)                            // bit 0 of CSR to enable the timer
-#define CLKINT      (1 << 2)                            // bit 2 of CSR to specify CPU clock
 #define CLOCK_HZ    16000000                            // Timer clock frequency
-#define MAX_RELOAD  16777215
-#define PWM_Freq    1                              // Frequency of the PWM waveform in Hz
+#define PWM_FREQ    100000                              // Frequency of the PWM waveform in Hz
+float duty_cycle = 50.0 ;
 
 #include <stdint.h>
 #include <stdbool.h>
 #include "tm4c123gh6pm.h"
 
-void PORT_E_init( void );
 void PORT_F_init( void );
-//void GPTM_SETUP( void );
-// void Delay(float seconds);
-void DynamicPWM(float duty_cycle, float on_time, float off_time);
+void GPTM_SETUP( float duty_cycle );
+void GPIOF_SETUP( void );
+void GPIOF_ISR( void );
 
 int main(void)
 {
-    float duty_cycle = 50 ;    // Start with 50% duty cycle
-    float on_time = duty_cycle / (100.0 * PWM_Freq) ;            // On time in seconds
-    float off_time = (100 - duty_cycle) / (100.0 * PWM_Freq) ;   // Off time in seconds
-    PORT_E_init();
+    // Setup Port F
     PORT_F_init();
-
-    while(1) {
-        // Set the duty cycle
-        if ((~GPIO_PORTF_DATA_R) & 0x10){
-            // SW1 increases the duty cycle by 5 %
-            if (duty_cycle >= 100){
-                duty_cycle = 99 ;
-            }
-            else{
-                duty_cycle += 5 ;
-                on_time = duty_cycle / (100.0 * PWM_Freq) ;            // On time in seconds
-                off_time = (100 - duty_cycle) / (100.0 * PWM_Freq) ;   // Off time in seconds
-            }
-        }
-        if ((~GPIO_PORTF_DATA_R) & 0x01){
-            // SW2 decreases the duty cycle by 5 %
-            if (duty_cycle <= 0){
-                duty_cycle = 1 ;
-            }
-            else{
-                duty_cycle -= 5 ;
-                on_time = duty_cycle / (100.0 * PWM_Freq) ;            // On time in seconds
-                off_time = (100 - duty_cycle) / (100.0 * PWM_Freq) ;   // Off time in seconds
-            }
-        }
-
-        DynamicPWM(duty_cycle, on_time, off_time) ;
+    // Setup PWM Timer
+    GPTM_SETUP( duty_cycle );
+    // Setup Interrupt for GPIO
+    GPIOF_SETUP();
+    while(1){
+        ;
     }
 }
 
-void PORT_E_init( void )
-{
-    SYSCTL_RCGC2_R |= SYSCTL_RCGC2_GPIOE ;               // Enable clock to PORT_E
-    GPIO_PORTE_LOCK_R = 0x4C4F434B ;             // Unlock commit register
-    GPIO_PORTE_CR_R = 0x01 ;                     // Make PORT_E0 configurable
-    GPIO_PORTE_DEN_R = 0x01 ;                    // Set PE0 pin as digital
-    GPIO_PORTE_DIR_R = 0x01 ;                    // Set PE0 pin as output
-    GPIO_PORTE_DATA_R = 0x00 ;
-}
 void PORT_F_init( void )
 {
     SYSCTL_RCGC2_R |= SYSCTL_RCGC2_GPIOF ;      // Enable clock to GPIO_F
@@ -73,56 +32,70 @@ void PORT_F_init( void )
     GPIO_PORTF_DEN_R = 0x1F ;                   // Set PORTF pins 4 pin
     GPIO_PORTF_DIR_R = 0x0E ;                   // Set PORTF4 pin as input user switch pin
     GPIO_PORTF_PUR_R = 0x11 ;                   // Set the switches for Pull Up
-    GPIO_PORTF_DATA_R = 0x00 ;                  // Initialize the LEDs to off state
+    GPIO_PORTF_AFSEL_R |= (1 << 1) ;                 // Alternate function assignment
+    GPIO_PORTF_PCTL_R |= (1 << 6) | (1 << 5) | (1 << 4) ; // Assign T0CCP1
 }
 
-void DynamicPWM(float duty_cycle, float on_time, float off_time)
+void GPTM_SETUP( float duty_cycle ){
+    unsigned long int count_value = CLOCK_HZ * (1.0 / PWM_FREQ) ;
+    unsigned long int match_value = count_value - (duty_cycle * CLOCK_HZ / (100 * PWM_FREQ)) ;
+    // Provide clock access to GPTM
+    SYSCTL_RCGCTIMER_R |= 0x01 ;
+    // GPTM Control Register :: Ensuring the Timer is OFF
+    TIMER0_CTL_R = 0x00 ;
+    // GPTM Configuration register :: Single mode
+    TIMER0_CFG_R = 0x04 ;
+    // GPTM Timer and Mode Register :: PWM Mode
+    TIMER0_TBMR_R = 0x00 ;
+    TIMER0_TBMR_R |= (1 << 3) ;
+    TIMER0_TBMR_R |= (1 << 1) ;
+    // GPTM Control Register :: Non-Inverted Output
+    TIMER0_CTL_R |= (1 << 6) ;
+    // GPTM Interval Load Register :: Count Top value
+    TIMER0_TBILR_R = count_value ;
+    // GPTM Match Value register
+    TIMER0_TBMATCHR_R = match_value ;
+    // GPTM CTL register :: Start the timer:
+    TIMER0_CTL_R |= (1 << 8) ;
+}
+
+void GPIOF_SETUP( void )
 {
-    unsigned long int time = CLOCK_HZ * on_time;
-        // Complete the residue:
-    STRELOAD = time;                                 // Set reload value
-    STCTRL |= (CLKINT | ENABLE);                        // Set internal clock, enable the timer
-    GPIO_PORTE_DATA_R = 0x01 ;
-    while ((STCTRL & COUNT_FLAG) == 0) {            // Wait until flag is set
-        STRELOAD = 0;// do nothing
-    }
-    // Stop the timer
-    STCTRL = 0;
-    // LOW/ Turn OFF
-    time = CLOCK_HZ * off_time ;
-    // Complete the residue:
-    STRELOAD = time;                                 // Set reload value
-    STCTRL |= (CLKINT | ENABLE);                        // Set internal clock, enable the timer
-    GPIO_PORTE_DATA_R = 0x00 ;
-    while ((STCTRL & COUNT_FLAG) == 0) {            // Wait until flag is set
-        STRELOAD = 0;// do nothing
-    }
-        // Stop the timer
-    STCTRL = 0;
+    // PORT F = ...|SW1|G|B|R|SW2|
+    // Interrupt sense register :: Used to configure whether interrupt is level/ edge sensitive.
+    // 1 => Level detection and 0 => Edge detection
+    GPIO_PORTF_IS_R = 0x00 ;
+    // Interrupt Event Register :: Used to configure whether event to be detected is high/low or rising/falling.
+    // 1 => Rising Edge/ High and 0 => Falling Edge/ Low
+    GPIO_PORTF_IEV_R = 0x00 ;
+    // Interrupt Both Edges Register :: Used to configure whether both edges are to be detected as events for interrupt.
+    GPIO_PORTF_IBE_R = 0x00 ;
+    // Interrupt Mask Register :: To determine whether to allow the interrupt generated to be passed onto interrupt controller or not.
+    // 1 == Send the interrupt
+    // 0 == Do not send the interrupt
+    GPIO_PORTF_IM_R = 0x11 ;
+    // Interrupt Clear Register :: Used to clear any pending interrupts
+    GPIO_PORTF_ICR_R = 0x11 ;
+    NVIC_EN0_R |=  (1 << 30) ; // Enable interrupt for GPIO Port F
 }
 
-//void GPTM_SETUP( void ){
-//    // GPTMT = General Purpose Timer Module
-//    // Provide clock access to GPTM
-//    SYSCTL_RCGCTIMER_R |= 0x01 ;
-//    // GPTMT Control Register :: Ensure that the timer is disabled.
-//    TIMER0_CTL_R = 0x00 ;
-//    // GPTMT Configuration Register :: 32-bit (concatenated) mode
-//    TIMER0_CFG_R = 0x00 ;
-//    // GPTMT Timer and Mode Register :: Selecting the mode (one-shot) and count direction (count-down)
-//    TIMER0_TAMR_R &= ~(1 << 4) ;
-//    TIMER0_TAMR_R |= (1 << 1) ;
-//}
-
-// void Delay(float seconds)
-// {
-//     // GPTMT Interval Load Register :: Load the counter value
-//     TIMER0_TAILR_R = (CLOCK_HZ * seconds) - 1 ;
-// //    TIMER0_TAILR_R = 4294967295 ;
-//     // Set the TAEN bit = 1 to enable the timer A.
-//     TIMER0_CTL_R |= (1 << 8) | (1 << 0) ;
-//     while (TIMER0_TAR_R > 0){
-//         ;
-//     }
-//     TIMER0_CTL_R &= ~(1 << 0) ;
-// }
+void GPIOF_ISR( void )
+{
+    // PORT F = ...|SW1|G|B|R|SW2|
+    GPIO_PORTF_ICR_R = 0x11 ;
+    int cnt = 0;
+    while(cnt<1000000){
+        cnt = cnt + 1;
+    }
+    if((~(GPIO_PORTF_DATA_R) & 0x11) && duty_cycle < 95 && duty_cycle > 5){
+        duty_cycle -= 5.0 ;
+    }
+    else{
+        duty_cycle += 5.0 ;
+    }
+    unsigned long int count_value = CLOCK_HZ * (1.0 / PWM_FREQ) ;
+    unsigned long int match_value = count_value - (duty_cycle * CLOCK_HZ / (100 * PWM_FREQ)) ;
+    // GPTM Interval Load Register :: Count Top value
+    // GPTM Match Value register
+    TIMER0_TBMATCHR_R = match_value ;
+}
