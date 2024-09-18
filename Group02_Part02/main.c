@@ -1,3 +1,11 @@
+/*
+ * Authors :
+ * 210020009 Ganesh Panduranga Karamsetty
+ * 210020036 Rishabh Pomaje
+ * Program that generates a variable duty cycle PWM. The duty cycle is varied by using a single push-button switch by 5% at a time.
+ * A long press leads to decrease in the duty cycle and a short press leads to increase in it.
+ */
+
 #define CLOCK_HZ    16000000                            // Timer clock frequency
 #define PWM_FREQ    100000                              // Frequency of the PWM waveform in Hz
 float duty_cycle = 50.0 ;                               // On-time Duty cycle of the PWM waveform
@@ -20,7 +28,7 @@ int main(void)
     // Setup Interrupt for GPIO
     GPIOF_SETUP();
     while(1){
-        ;// Handled by interrupts & ISR
+        NVIC_EN0_R |=  (1 << 30) ;// Handled by interrupts & ISR
     }
 }
 
@@ -81,6 +89,7 @@ void GPIOF_SETUP( void )
 void GPIOF_ISR( void )
 {
     // PORT F = ...|SW1|G|B|R|SW2|
+    NVIC_EN0_R |=  ~(1 << 30) ;
     int hold_time = 0;
     int threshold = 1000000 ;
     while(hold_time < threshold){

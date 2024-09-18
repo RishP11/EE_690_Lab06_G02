@@ -1,3 +1,11 @@
+/*
+ * Authors :
+ * 210020009 Ganesh Panduranga Karamsetty
+ * 210020036 Rishabh Pomaje
+ * Program that generates a variable duty cycle PWM. The duty cycle is varied by using two push-button switches by 5% at a time.
+ * Pressing one switch increases the duty cycle while the other decreases it.
+ */
+
 #define CLOCK_HZ    16000000                            // Timer clock frequency
 #define PWM_FREQ    100000                              // Frequency of the PWM waveform in Hz
 float duty_cycle = 50.0 ;
@@ -20,7 +28,7 @@ int main(void)
     // Setup Interrupt for GPIO
     GPIOF_SETUP();
     while(1){
-        ;
+        NVIC_EN0_R |=  (1 << 30) ; // Handled by interrupts and ISR
     }
 }
 
@@ -62,17 +70,16 @@ void GPTM_SETUP( float duty_cycle ){
 void GPIOF_SETUP( void )
 {
     // PORT F = ...|SW1|G|B|R|SW2|
-    // Interrupt sense register :: Used to configure whether interrupt is level/ edge sensitive.
+    // Interrupt sense register :: Determine interrupt is level/ edge sensitive.
     // 1 => Level detection and 0 => Edge detection
     GPIO_PORTF_IS_R = 0x00 ;
-    // Interrupt Event Register :: Used to configure whether event to be detected is high/low or rising/falling.
+    // Interrupt Event Register :: Configure whether event to be detected is high/low or rising/falling.
     // 1 => Rising Edge/ High and 0 => Falling Edge/ Low
     GPIO_PORTF_IEV_R = 0x00 ;
-    // Interrupt Both Edges Register :: Used to configure whether both edges are to be detected as events for interrupt.
+    // Interrupt Both Edges Register :: Configure whether both edges are to be detected as events for interrupt.
     GPIO_PORTF_IBE_R = 0x00 ;
     // Interrupt Mask Register :: To determine whether to allow the interrupt generated to be passed onto interrupt controller or not.
-    // 1 == Send the interrupt
-    // 0 == Do not send the interrupt
+    // 1 => Send the interrupt and 0 => Do not send the interrupt
     GPIO_PORTF_IM_R = 0x11 ;
     // Interrupt Clear Register :: Used to clear any pending interrupts
     GPIO_PORTF_ICR_R = 0x11 ;
@@ -81,14 +88,15 @@ void GPIOF_SETUP( void )
 
 void GPIOF_ISR( void )
 {
+    NVIC_EN0_R |=  ~(1 << 30) ;
     // PORT F = ...|SW1|G|B|R|SW2|
+    if((~(GPIO_PORTF_DATA_R) & 0x01) && duty_cycle <= 95){
+        duty_cycle += 4.99 ;
+    }
+    if((~(GPIO_PORTF_DATA_R) & 0x10) && duty_cycle >= 5){
+        duty_cycle -= 4.99 ;
+    }
     GPIO_PORTF_ICR_R = 0x11 ;
-    if((~(GPIO_PORTF_DATA_R) & 0x01) && duty_cycle < 95){
-        duty_cycle += 5.0 ;
-    }
-    if((~(GPIO_PORTF_DATA_R) & 0x10) && duty_cycle > 5){
-        duty_cycle -= 5.0 ;
-    }
     unsigned long int count_value = CLOCK_HZ * (1.0 / PWM_FREQ) ;
     unsigned long int match_value = count_value - (duty_cycle * CLOCK_HZ / (100 * PWM_FREQ)) ;
     // GPTM Interval Load Register :: Count Top value
